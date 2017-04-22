@@ -422,72 +422,84 @@ boolean PubSubClient::publish_P(const char* topic, const uint8_t* payload, unsig
 }
 
 
-boolean PubSubClient::startPublish(const char* topic, unsigned int plength) {
+boolean PubSubClient::startPublish(const char* topic, unsigned int plength, boolean retained) {
   if (connected()) {
       // if (MQTT_MAX_PACKET_SIZE < 5 + 2+strlen(topic) + plength) {
       //     // Too long
       //     return false;
       // }
       // Leave room in the buffer for header and variable length field
+
+      uint8_t lenBuf[4];
+      uint8_t llen = 0;
+      uint8_t digit;
+      uint8_t pos = 0;
+      uint16_t rc;
+      uint16_t len;
       uint16_t length = 5;
       length = writeString(topic,buffer,length);
       uint16_t i;
-      for (i=0;i<plength;i++) {
-          buffer[length++] = payload[i];
-      }
       uint8_t header = MQTTPUBLISH;
       if (retained) {
           header |= 1;
       }
-      return write(header,buffer,length-5);
+      len = length + plength - 5;
+      do {
+          digit = len % 128;
+          len = len / 128;
+          if (len > 0) {
+              digit |= 0x80;
+          }
+          lenBuf[pos++] = digit;
+          llen++;
+      } while(len>0);
+
+      buffer[4-llen] = header;
+      for (int i=0;i<llen;i++) {
+          buffer[5-llen+i] = lenBuf[i];
+      }
+#ifdef MQTT_MAX_TRANSFER_SIZE
+      uint8_t* writeBuf = buffer+(4-llen);
+      uint16_t bytesRemaining = length-4+llen;  //Match the length type
+      uint8_t bytesToWrite;
+      boolean result = true;
+      while((bytesRemaining > 0) && result) {
+          bytesToWrite = (bytesRemaining > MQTT_MAX_TRANSFER_SIZE)?MQTT_MAX_TRANSFER_SIZE:bytesRemaining;
+          rc = _client->write(writeBuf,bytesToWrite);
+          result = (rc == bytesToWrite);
+          bytesRemaining -= rc;
+          writeBuf += rc;
+      }
+      return result;
+#else
+      rc = _client->write(buffer+(4-llen),length-4+llen);
+      lastOutActivity = millis();
+      return (rc == length-4+llen);
+#endif
   }
   return false;
 }
 
-boolean PubSubClient::writePayload(const uin8_t * payloadPart, unsigned int partLength) {
-
-}
-
-boolean PubSubClient::write(uint8_t header, uint8_t* buf, uint16_t length) {
-    uint8_t lenBuf[4];
-    uint8_t llen = 0;
-    uint8_t digit;
-    uint8_t pos = 0;
-    uint16_t rc;
-    uint16_t len = length;
-    do {
-        digit = len % 128;
-        len = len / 128;
-        if (len > 0) {
-            digit |= 0x80;
-        }
-        lenBuf[pos++] = digit;
-        llen++;
-    } while(len>0);
-
-    buf[4-llen] = header;
-    for (int i=0;i<llen;i++) {
-        buf[5-llen+i] = lenBuf[i];
-    }
-
-#ifdef MQTT_MAX_TRANSFER_SIZE
-    uint8_t* writeBuf = buf+(4-llen);
-    uint16_t bytesRemaining = length+1+llen;  //Match the length type
-    uint8_t bytesToWrite;
-    boolean result = true;
-    while((bytesRemaining > 0) && result) {
-        bytesToWrite = (bytesRemaining > MQTT_MAX_TRANSFER_SIZE)?MQTT_MAX_TRANSFER_SIZE:bytesRemaining;
-        rc = _client->write(writeBuf,bytesToWrite);
-        result = (rc == bytesToWrite);
-        bytesRemaining -= rc;
-        writeBuf += rc;
-    }
-    return result;
-#else
-    rc = _client->write(buf+(4-llen),length+1+llen);
-    lastOutActivity = millis();
-    return (rc == 1+llen+length);
-#endif
+size_t PubSubClient::writePayload(const uint8_t * payloadPart, unsigned int partLength) {
+  uint16_t rc;
+  #ifdef MQTT_MAX_TRANSFER_SIZE
+      uint8_t* writeBuf = (uint8_t*)payloadPart;
+      uint16_t bytesRemaining = partLength;  //Match the length type
+      uint8_t bytesToWrite;
+      boolean result = true;
+      while((bytesRemaining > 0) && result) {
+          bytesToWrite = (bytesRemaining > MQTT_MAX_TRANSFER_SIZE)?MQTT_MAX_TRANSFER_SIZE:bytesRemaining;
+          rc = _client->write(writeBuf,bytesToWrite);
+          result = (rc == bytesToWrite);
+          bytesRemaining -= rc;
+          writeBuf += rc;
+      }
+      return writeBuf - payloadPart;
+  #else
+      rc = _client->write(payloadPart,partLength);
+      lastOutActivity = millis();
+      return rc;
+  #endif
 }
 
 boolean PubSubClient::write(uint8_t header, uint8_t* buf, uint16_t length) {

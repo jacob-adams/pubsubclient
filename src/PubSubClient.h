@@ -127,8 +127,8 @@ public:
    boolean connect(const char* id, const char* willTopic, uint8_t willQos, boolean willRetain, const char* willMessage);
    boolean connect(const char* id, const char* user, const char* pass, const char* willTopic, uint8_t willQos, boolean willRetain, const char* willMessage);
    void disconnect();
-   boolean startPublish(const char* topic, unsigned int plength);
-   boolean writePayload(const uin8_t * payloadPart, unsigned int partLength);
+   boolean startPublish(const char* topic, unsigned int plength, boolean retained);
+   size_t writePayload(const uint8_t * payloadPart, unsigned int partLength);
    boolean publish(const char* topic, const char* payload);
    boolean publish(const char* topic, const char* payload, boolean retained);
    boolean publish(const char* topic, const uint8_t * payload, unsigned int plength);
